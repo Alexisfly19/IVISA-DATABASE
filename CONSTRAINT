@@ -1,0 +1,147 @@
+--1. UNICIDAD PARA EVITAR DUPLICADOS
+
+-- Evitar clientes duplicados (mismo nombre + apellido + email)
+ALTER TABLE Cliente ADD CONSTRAINT uk_cliente_unico 
+UNIQUE (Nombre, Apellido, Correo_Electronico);
+
+-- Evitar pasaportes duplicados para diferentes clientes
+ALTER TABLE Pasaporte ADD CONSTRAINT uk_pasaporte_unico 
+UNIQUE (Num_Pasaporte);
+
+-- Evitar productos duplicados (mismo tipo + mismo destino)
+ALTER TABLE Producto ADD CONSTRAINT uk_producto_unico 
+UNIQUE (Tipo_Producto, Pais_Destino);
+
+-- Evitar múltiples solicitudes idénticas del mismo cliente
+ALTER TABLE Solicitud ADD CONSTRAINT uk_solicitud_unica 
+UNIQUE (id_cliente, id_producto, Fecha_Solicitud);
+
+--2. INTEGRIDAD TEMPORAL Y FECHAS
+
+-- Validar que fecha de expiración > fecha de emisión (Pasaporte)
+ALTER TABLE Pasaporte ADD CONSTRAINT ck_pasaporte_fechas 
+CHECK (Fecha_Expiracion > Fecha_Emision);
+
+-- Validar que fecha de viaje sea futura
+ALTER TABLE Solicitud ADD CONSTRAINT ck_fecha_viaje_futura 
+CHECK (Fecha_Viaje_Planeada > Fecha_Solicitud);
+
+-- Validar flujo temporal de solicitudes
+ALTER TABLE Solicitud ADD CONSTRAINT ck_flujo_fechas_solicitud 
+CHECK (Fecha_Procesamiento >= Fecha_Solicitud AND Fecha_Finalizacion >= Fecha_Procesamiento);
+
+-- Validar que resolución sea posterior al contacto (Soporte)
+ALTER TABLE Soporte_Cliente ADD CONSTRAINT ck_fechas_soporte 
+CHECK (Fecha_Resolucion >= Fecha_Contacto);
+
+--3. RESTRICCIONES DE EDAD Y DOCUMENTOS
+
+-- Validar edad mínima para trámites (mayor de 18, excepto menores acompañados)
+ALTER TABLE Cliente ADD CONSTRAINT ck_edad_minima 
+CHECK (Edad >= 0 AND Edad <= 120);
+
+-- Restricción específica para productos que requieren mayoría de edad
+ALTER TABLE Solicitud ADD CONSTRAINT ck_edad_producto 
+CHECK (
+    (SELECT Edad FROM Cliente WHERE id_cliente = Solicitud.id_cliente) >= 18 
+    OR id_producto IN (SELECT id_producto FROM Producto WHERE Tipo_Producto != 'Visa_Embajada')
+);
+
+-- Validar formato de email
+ALTER TABLE Cliente ADD CONSTRAINT ck_email_valido 
+CHECK (Correo_Electronico LIKE '%@%.%');
+
+--4. INTEGRIDAD FINANCIERA
+
+-- Precio final no puede ser menor que precio base
+ALTER TABLE Solicitud ADD CONSTRAINT ck_precio_valido 
+CHECK (Precio_Final >= (SELECT Precio_Base FROM Producto WHERE id_producto = Solicitud.id_producto));
+
+-- Monto de pago debe coincidir con precio final
+ALTER TABLE Pago ADD CONSTRAINT ck_monto_coincidente 
+CHECK (Monto = (SELECT Precio_Final FROM Solicitud WHERE id_solicitud = Pago.id_solicitud));
+
+-- Evitar pagos duplicados para misma solicitud
+ALTER TABLE Pago ADD CONSTRAINT uk_pago_unico 
+UNIQUE (id_solicitud);
+
+--5. RESTRICCIONES DE ESTADO Y FLUJO DE TRABAJO
+
+-- Una solicitud no puede estar en dos estados simultáneos
+ALTER TABLE Solicitud ADD CONSTRAINT ck_estado_exclusivo 
+CHECK (Estado IN ('Recibido', 'En_Revision', 'Infonered', 'Waiting_On_GO', 'Aprobado', 'Rechazado', 'Finalizado'));
+
+-- Validar transiciones de estado válidas
+ALTER TABLE Solicitud ADD CONSTRAINT ck_transicion_estados 
+CHECK (
+    (Estado = 'Recibido' AND Fecha_Procesamiento IS NULL) OR
+    (Estado IN ('En_Revision', 'Infonered') AND Fecha_Procesamiento IS NOT NULL) OR
+    (Estado IN ('Aprobado', 'Rechazado', 'Finalizado') AND Fecha_Finalizacion IS NOT NULL)
+);
+
+-- Un agente no puede procesar la misma solicitud dos veces
+ALTER TABLE Procesamiento_Solicitud ADD CONSTRAINT uk_procesamiento_unico 
+UNIQUE (id_solicitud, id_agente, Fecha_Asignacion);
+
+--6. RESTRICCIONES DE NEGOCIO ESPECÍFICAS DE IVISA
+
+-- Límite de solicitudes simultáneas por cliente (prevenir abuso)
+ALTER TABLE Solicitud ADD CONSTRAINT ck_max_solicitudes_activas 
+CHECK (
+    (SELECT COUNT(*) FROM Solicitud 
+     WHERE id_cliente = Solicitud.id_cliente 
+     AND Estado IN ('Recibido', 'En_Revision', 'Infonered', 'Waiting_On_GO')) <= 10
+);
+
+-- Validar que países de destino sean válidos (lista predefinida)
+ALTER TABLE Producto ADD CONSTRAINT ck_pais_destino_valido 
+CHECK (Pais_Destino IN ('Estados Unidos', 'Canada', 'Reino Unido', 'Australia', 'Nueva Zelanda', 'Schengen', 'Japon', 'China', 'India', 'Brasil'));
+
+-- Tiempo de procesamiento realista (máximo 30 días)
+ALTER TABLE Procesamiento_Solicitud ADD CONSTRAINT ck_tiempo_procesamiento 
+CHECK (Tiempo_Procesamiento BETWEEN 1 AND 43200); -- 1 minuto a 30 días en minutos
+
+--7. RESTRICCIONES PARA SOLICITUDES GRUPALES
+
+-- Validar que el cliente principal existe y es válido
+ALTER TABLE Solicitud_Grupal ADD CONSTRAINT ck_cliente_principal_valido 
+CHECK (id_cliente_principal IN (SELECT id_cliente FROM Cliente));
+
+-- Cantidad de personas en grupo debe coincidir con solicitudes
+ALTER TABLE Solicitud_Grupal ADD CONSTRAINT ck_cantidad_personas 
+CHECK (Cantidad_Personas = (SELECT COUNT(*) FROM Solicitud_Grupal_Detalle WHERE id_grupo = Solicitud_Grupal.id_grupo));
+
+-- Evitar que una solicitud pertenezca a múltiples grupos
+ALTER TABLE Solicitud_Grupal_Detalle ADD CONSTRAINT uk_solicitud_unica_grupo 
+UNIQUE (id_solicitud);
+
+
+--8. TRIGGERS ADICIONALES PARA INTEGRIDAD
+
+
+-- Trigger para actualizar edad automáticamente
+CREATE OR REPLACE TRIGGER trg_actualizar_edad
+BEFORE INSERT OR UPDATE ON Cliente
+FOR EACH ROW
+BEGIN
+    :NEW.Edad := TRUNC(MONTHS_BETWEEN(SYSDATE, :NEW.Fecha_Nacimiento) / 12);
+END;
+/
+
+-- Trigger para validar estado de pago vs estado de solicitud
+CREATE OR REPLACE TRIGGER trg_validar_estado_pago
+BEFORE INSERT OR UPDATE ON Pago
+FOR EACH ROW
+DECLARE
+    v_estado_solicitud VARCHAR2(20);
+BEGIN
+    SELECT Estado INTO v_estado_solicitud 
+    FROM Solicitud 
+    WHERE id_solicitud = :NEW.id_solicitud;
+    
+    IF :NEW.Estado_Pago = 'Completado' AND v_estado_solicitud != 'Recibido' THEN
+        RAISE_APPLICATION_ERROR(-20001, 'Solo se pueden pagar solicitudes en estado "Recibido"');
+    END IF;
+END;
+/
+
