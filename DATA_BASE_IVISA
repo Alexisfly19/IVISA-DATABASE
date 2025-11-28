@@ -1,0 +1,175 @@
+# IVISA-DATABASE
+
+-- Tabla principal de Clientes
+CREATE TABLE Cliente (
+  id_cliente NUMBER PRIMARY KEY,
+  Nacionalidad VARCHAR2(100),
+  Nombre VARCHAR2(100),
+  Apellido VARCHAR2(100),
+  Fecha_Nacimiento DATE,
+  Edad NUMBER,
+  Correo_Electronico VARCHAR2(255),
+  Tipo_Cliente VARCHAR2(20) DEFAULT 'Individual',
+  Programa_Fidelidad VARCHAR2(20) DEFAULT 'Basico',
+  Fecha_Registro DATE DEFAULT SYSDATE
+);
+
+-- Secuencia para Cliente
+CREATE SEQUENCE seq_cliente START WITH 1 INCREMENT BY 1;
+
+-- Tabla de Pasaportes
+CREATE TABLE Pasaporte (
+  Num_Pasaporte VARCHAR2(50) PRIMARY KEY,
+  Tipo VARCHAR2(50),
+  Fecha_Emision DATE,
+  Fecha_Expiracion DATE,
+  Pais_Emision VARCHAR2(100),
+  id_cliente NUMBER,
+  CONSTRAINT fk_pasaporte_cliente FOREIGN KEY (id_cliente) REFERENCES Cliente(id_cliente)
+);
+
+-- Tabla de Productos/Servicios (220 productos)
+CREATE TABLE Producto (
+  id_producto NUMBER PRIMARY KEY,
+  Nombre_Producto VARCHAR2(100),
+  Tipo_Producto VARCHAR2(30),
+  Pais_Destino VARCHAR2(100),
+  Tiempo_Proceso_Estimado NUMBER,
+  Precio_Base NUMBER(10,2),
+  Requisitos_Especificos CLOB
+);
+
+-- Secuencia para Producto
+CREATE SEQUENCE seq_producto START WITH 1 INCREMENT BY 1;
+
+-- Tabla de Solicitudes/Formularios
+CREATE TABLE Solicitud (
+  id_solicitud NUMBER PRIMARY KEY,
+  id_cliente NUMBER,
+  id_producto NUMBER,
+  Fecha_Viaje_Planeada DATE,
+  Tipo_Servicio VARCHAR2(20) DEFAULT 'Estandar',
+  Precio_Final NUMBER(10,2),
+  Estado VARCHAR2(20) DEFAULT 'Recibido',
+  Fecha_Solicitud DATE DEFAULT SYSDATE,
+  Fecha_Procesamiento DATE,
+  Fecha_Finalizacion DATE,
+  Num_Orden VARCHAR2(50) UNIQUE,
+  CONSTRAINT fk_solicitud_cliente FOREIGN KEY (id_cliente) REFERENCES Cliente(id_cliente),
+  CONSTRAINT fk_solicitud_producto FOREIGN KEY (id_producto) REFERENCES Producto(id_producto)
+);
+
+-- Secuencia para Solicitud
+CREATE SEQUENCE seq_solicitud START WITH 1 INCREMENT BY 1;
+
+-- Tabla de Agentes Procesadores
+CREATE TABLE Agente_Procesador (
+  id_agente NUMBER PRIMARY KEY,
+  Nombre VARCHAR2(100),
+  Email VARCHAR2(255),
+  Departamento VARCHAR2(100),
+  Paises_Especializacion VARCHAR2(255),
+  Productividad_Diaria NUMBER DEFAULT 0
+);
+
+-- Secuencia para Agente
+CREATE SEQUENCE seq_agente START WITH 1 INCREMENT BY 1;
+
+-- Tabla de Documentos Subidos
+CREATE TABLE Documento_Solicitud (
+  id_documento NUMBER PRIMARY KEY,
+  id_solicitud NUMBER,
+  Tipo_Documento VARCHAR2(30),
+  Nombre_Archivo VARCHAR2(255),
+  Ruta_Cloud VARCHAR2(500),
+  Fecha_Subida DATE DEFAULT SYSDATE,
+  Estado_Verificacion VARCHAR2(20) DEFAULT 'Pendiente',
+  CONSTRAINT fk_documento_solicitud FOREIGN KEY (id_solicitud) REFERENCES Solicitud(id_solicitud)
+);
+
+-- Secuencia para Documento
+CREATE SEQUENCE seq_documento START WITH 1 INCREMENT BY 1;
+
+-- Tabla de Asignación Agente-Solicitud
+CREATE TABLE Procesamiento_Solicitud (
+  id_solicitud NUMBER,
+  id_agente NUMBER,
+  Fecha_Asignacion DATE DEFAULT SYSDATE,
+  Tiempo_Procesamiento NUMBER,
+  Comentarios_Agente CLOB,
+  Estado_Procesamiento VARCHAR2(30),
+  CONSTRAINT pk_procesamiento PRIMARY KEY (id_solicitud, id_agente),
+  CONSTRAINT fk_proc_solicitud FOREIGN KEY (id_solicitud) REFERENCES Solicitud(id_solicitud),
+  CONSTRAINT fk_proc_agente FOREIGN KEY (id_agente) REFERENCES Agente_Procesador(id_agente)
+);
+
+-- Tabla de Customer Experience
+CREATE TABLE Soporte_Cliente (
+  id_soporte NUMBER PRIMARY KEY,
+  id_cliente NUMBER,
+  id_solicitud NUMBER,
+  Tipo_Contacto VARCHAR2(20),
+  Asunto VARCHAR2(255),
+  Descripcion CLOB,
+  Estado VARCHAR2(20) DEFAULT 'Abierto',
+  Fecha_Contacto DATE DEFAULT SYSDATE,
+  Fecha_Resolucion DATE,
+  Calificacion_Servicio NUMBER,
+  CONSTRAINT fk_soporte_cliente FOREIGN KEY (id_cliente) REFERENCES Cliente(id_cliente),
+  CONSTRAINT fk_soporte_solicitud FOREIGN KEY (id_solicitud) REFERENCES Solicitud(id_solicitud)
+);
+
+-- Secuencia para Soporte
+CREATE SEQUENCE seq_soporte START WITH 1 INCREMENT BY 1;
+
+-- Tabla de Pagos (encriptados)
+CREATE TABLE Pago (
+  id_pago NUMBER PRIMARY KEY,
+  id_solicitud NUMBER,
+  Metodo_Pago VARCHAR2(30),
+  Monto NUMBER(10,2),
+  Moneda VARCHAR2(3) DEFAULT 'USD',
+  Estado_Pago VARCHAR2(20),
+  Codigo_Comprobante VARCHAR2(100) UNIQUE,
+  Fecha_Pago DATE DEFAULT SYSDATE,
+  CONSTRAINT fk_pago_solicitud FOREIGN KEY (id_solicitud) REFERENCES Solicitud(id_solicitud)
+);
+
+-- Secuencia para Pago
+CREATE SEQUENCE seq_pago START WITH 1 INCREMENT BY 1;
+
+-- Tabla de Historial de Cambios
+CREATE TABLE Historial_Solicitud (
+  id_historial NUMBER PRIMARY KEY,
+  id_solicitud NUMBER,
+  Accion VARCHAR2(100),
+  Descripcion CLOB,
+  Usuario_Responsable VARCHAR2(100),
+  Fecha_Cambio DATE DEFAULT SYSDATE,
+  CONSTRAINT fk_historial_solicitud FOREIGN KEY (id_solicitud) REFERENCES Solicitud(id_solicitud)
+);
+
+-- Secuencia para Historial
+CREATE SEQUENCE seq_historial START WITH 1 INCREMENT BY 1;
+
+-- Tabla de Solicitudes Grupales
+CREATE TABLE Solicitud_Grupal (
+  id_grupo NUMBER PRIMARY KEY,
+  id_cliente_principal NUMBER,
+  Nombre_Grupo VARCHAR2(100),
+  Cantidad_Personas NUMBER,
+  Fecha_Creacion DATE DEFAULT SYSDATE,
+  CONSTRAINT fk_grupo_cliente FOREIGN KEY (id_cliente_principal) REFERENCES Cliente(id_cliente)
+);
+
+-- Secuencia para Grupo
+CREATE SEQUENCE seq_grupo START WITH 1 INCREMENT BY 1;
+
+-- Relación Solicitudes-Grupo
+CREATE TABLE Solicitud_Grupal_Detalle (
+  id_grupo NUMBER,
+  id_solicitud NUMBER,
+  CONSTRAINT pk_grupal_detalle PRIMARY KEY (id_grupo, id_solicitud),
+  CONSTRAINT fk_detalle_grupo FOREIGN KEY (id_grupo) REFERENCES Solicitud_Grupal(id_grupo),
+  CONSTRAINT fk_detalle_solicitud FOREIGN KEY (id_solicitud) REFERENCES Solicitud(id_solicitud)
+);
